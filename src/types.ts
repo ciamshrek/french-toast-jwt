@@ -49,6 +49,8 @@ export interface VerifyOptions {
   resolveKey?: (issuer: string) => Promise<KeyInput | string>;
   /** Clock tolerance in seconds for iat/exp checks (default: 60) */
   clockTolerance?: number;
+  /** Maximum chain depth (default: 10) */
+  maxDepth?: number;
 }
 
 export interface ChainLink {

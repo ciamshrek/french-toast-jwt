@@ -463,6 +463,36 @@ deriving it from the private key.
 When verifying "exp" constraints across the chain, implementations
 SHOULD allow for reasonable clock skew between participants.
 
+### 9.7.  Key Discovery and SSRF
+
+Automatic key discovery resolves metadata documents and JWKS URIs
+derived from the "iss" claim of each token in the chain.  Since
+"iss" is attacker-controlled in child tokens, this creates a
+server-side request forgery (SSRF) risk: a malicious token can
+direct the verifier to fetch from internal network addresses.
+
+Implementations MUST take the following precautions:
+
+-  Restrict metadata and JWKS fetches to the "https" scheme.
+   Plaintext "http" MUST NOT be used in production.
+
+-  Apply timeouts to all outbound requests during discovery to
+   prevent slowloris-style denial of service.
+
+-  Consider maintaining an allowlist of trusted issuer domains
+   or URI prefixes.  Tokens with issuers outside the allowlist
+   SHOULD be rejected before any network request is made.
+
+-  Validate that "jwks_uri" values in metadata responses are
+   HTTPS and belong to the expected issuer's domain.
+
+-  Limit the number of distinct issuers resolved per
+   verification to bound network amplification.
+
+When the deployment environment is known, implementations SHOULD
+prefer the "resolveKey" callback (or equivalent) over automatic
+discovery, providing keys from a trusted local source.
+
 ## 10.  Normative References
 
 -  **RFC 2119**  Key words for use in RFCs to Indicate Requirement Levels
