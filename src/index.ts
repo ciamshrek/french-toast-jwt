@@ -1,7 +1,21 @@
-export { frenchToast } from './sign.js';
-export { verify } from './verify.js';
-export { createDPoPProof, verifyDPoPProof } from './dpop.js';
-export { discoverKeys, clearKeyCache } from './discovery.js';
+import { frenchToast as delegate } from './sign.js';
+import { verify } from './verify.js';
+import { createDPoPProof, verifyDPoPProof } from './dpop.js';
+import { discoverKeys, clearKeyCache } from './discovery.js';
+
+export const frenchToast = {
+  delegate,
+  verify,
+  createDPoPProof,
+  verifyDPoPProof,
+  discoverKeys,
+  clearKeyCache,
+};
+
+export default frenchToast;
+
+// Also export individually for destructured imports
+export { delegate, verify, createDPoPProof, verifyDPoPProof, discoverKeys, clearKeyCache };
 
 export type {
   FrenchToastOptions,
