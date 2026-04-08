@@ -2,6 +2,10 @@ export type KeyInput = CryptoKey | Uint8Array;
 
 export const FT_TYPE = 'ft+jwt';
 export const FT_PARENT_HEADER = 'ft_parent';
+export const FT_ISS_HEADER = 'ft_iss';
+export const FT_DEP_HEADER = 'ft_dep';
+export const CHAIN_DELIMITER = '&';
+export const DEFAULT_MAX_DEPTH = 5;
 
 export interface FrenchToastOptions {
   /** Signer's private key */
@@ -18,6 +22,10 @@ export interface FrenchToastOptions {
   algorithm?: string;
   /** The next hop's public key — its JWK thumbprint goes into cnf.jkt */
   nextHopPublicKey?: KeyInput;
+  /** Allowed issuers for the chain (ft_iss header). Must be a subset of parent's ft_iss if present. */
+  allowedIssuers?: string[];
+  /** Max remaining delegation depth (ft_dep header). Must be <= parent's ft_dep - 1 if present. */
+  maxDepth?: number;
 }
 
 export interface DPoPOptions {
@@ -47,6 +55,8 @@ export interface VerifyOptions {
    * Given an issuer, return the public key or JWKS URI.
    */
   resolveKey?: (issuer: string) => Promise<KeyInput | string>;
+  /** Allowed issuers. If set, tokens from issuers not in this list are rejected before key discovery. */
+  allowedIssuers?: string[];
   /** Clock tolerance in seconds for iat/exp checks (default: 60) */
   clockTolerance?: number;
   /** Maximum chain depth (default: 10) */

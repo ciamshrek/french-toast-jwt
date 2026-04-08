@@ -7,14 +7,13 @@
  *
  *   - Authorization Server Metadata (RFC 8414)
  *   - Client ID Metadata Document (CIMD)
- *   - Protected Resource Metadata (RFC 9728)
  */
 import { exportJWK } from 'jose';
 
 interface Participant {
   publicKey: CryptoKey;
   /** Which metadata document type this participant publishes */
-  metadataType: 'as-metadata' | 'cimd' | 'prm';
+  metadataType: 'as-metadata' | 'cimd';
 }
 
 /**
@@ -66,27 +65,6 @@ export function createDiscoveryResolver(participants: Record<string, Participant
         console.log(`         "jwks_uri": "${jwksUri}",`);
         console.log(`         "token_endpoint_auth_method": "private_key_jwt",`);
         console.log(`         "dpop_bound_access_tokens": true`);
-        console.log(`       }`);
-        console.log(`    -> GET ${jwksUri}`);
-        console.log(`    <- 200 OK (JWK Set)`);
-        console.log(`       { "keys": [{ "kty": "${publicJwk.kty}", "crv": "${publicJwk.crv}", "kid": "${kid}...", "use": "sig" }] }`);
-        console.log(`    -> Signature verified with kid="${kid}..."`);
-        console.log();
-        break;
-      }
-
-      case 'prm': {
-        const metadataUrl = `${issuer}/.well-known/oauth-protected-resource`;
-        const jwksUri = `${issuer}/jwks`;
-
-        console.log(`  [discovery] Issuer: ${issuer}`);
-        console.log(`    -> GET ${metadataUrl}`);
-        console.log(`    <- 200 OK (Protected Resource Metadata - RFC 9728)`);
-        console.log(`       {`);
-        console.log(`         "resource": "${issuer}",`);
-        console.log(`         "jwks_uri": "${jwksUri}",`);
-        console.log(`         "authorization_servers": ["https://as.example.com"],`);
-        console.log(`         "dpop_signing_alg_values_supported": ["ES256"]`);
         console.log(`       }`);
         console.log(`    -> GET ${jwksUri}`);
         console.log(`    <- 200 OK (JWK Set)`);

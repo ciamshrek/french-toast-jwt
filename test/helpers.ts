@@ -1,4 +1,5 @@
 import { generateKeyPair, SignJWT, exportJWK, calculateJwkThumbprint } from 'jose';
+import { createHash } from 'node:crypto';
 
 /**
  * Generate an ES256 key pair and return both keys + JWK thumbprint.
@@ -11,7 +12,7 @@ export async function makeKeyPair() {
 }
 
 /**
- * Create a fake "Authorization Server" token (simulates what Auth0/etc would issue).
+ * Create a root token (simulates what an AS would issue). Uses typ: ft+jwt.
  */
 export async function makeRootToken(options: {
   privateKey: CryptoKey | Uint8Array;
@@ -28,7 +29,7 @@ export async function makeRootToken(options: {
       ? { cnf: { jkt: options.nextHopThumbprint } }
       : {}),
   })
-    .setProtectedHeader({ alg: 'ES256', typ: 'at+jwt' })
+    .setProtectedHeader({ alg: 'ES256', typ: 'ft+jwt' })
     .setIssuer(options.issuer)
     .setSubject(options.subject)
     .setAudience(options.audience)
@@ -36,4 +37,11 @@ export async function makeRootToken(options: {
     .setExpirationTime(options.expiresIn ? `${options.expiresIn}s` : '1h');
 
   return builder.sign(options.privateKey);
+}
+
+/**
+ * Hash a token (sha256, base64url).
+ */
+export function hashToken(token: string): string {
+  return createHash('sha256').update(token, 'ascii').digest('base64url');
 }

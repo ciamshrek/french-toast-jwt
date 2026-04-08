@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { decodeJwt, decodeProtectedHeader } from 'jose';
 import { frenchToast } from '../src/sign.js';
 import { FT_TYPE, FT_PARENT_HEADER } from '../src/types.js';
-import { makeKeyPair, makeRootToken } from './helpers.js';
+import { makeKeyPair, makeRootToken, hashToken } from './helpers.js';
 
 describe('frenchToast (sign)', () => {
   it('should create a french-toast token with ft_parent in header', async () => {
@@ -28,7 +28,7 @@ describe('frenchToast (sign)', () => {
     const payload = decodeJwt(ftToken);
 
     expect(header.typ).toBe(FT_TYPE);
-    expect(header[FT_PARENT_HEADER]).toBe(rootToken);
+    expect(header[FT_PARENT_HEADER]).toBe(hashToken(rootToken));
     expect(payload.iss).toBe('https://client1.example.com/client_id.json');
     expect(payload.aud).toBe('https://rs.example.com');
     expect(payload.sub).toBe('user|abc123');

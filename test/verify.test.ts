@@ -13,7 +13,6 @@ describe('verify temporal bounds', () => {
     const as = await makeKeyPair();
     const client1 = await makeKeyPair();
 
-    // Create a root token that expires in 1 second
     const tokenA = await makeRootToken({
       privateKey: as.privateKey,
       issuer: 'https://as.example.com',
@@ -38,7 +37,7 @@ describe('verify temporal bounds', () => {
     };
 
     await expect(
-      verify(tokenB, {
+      verify([tokenB, tokenA], {
         resolveKey: async (issuer) => keys[issuer],
         clockTolerance: 0,
       }),
@@ -47,17 +46,15 @@ describe('verify temporal bounds', () => {
 
   it('should reject a token with iat in the future', async () => {
     const as = await makeKeyPair();
-    const client1 = await makeKeyPair();
 
-    // Manually create a token with iat far in the future
     const futureIat = Math.floor(Date.now() / 1000) + 3600;
     const futureExp = futureIat + 3600;
 
     const tokenA = await new SignJWT({ scope: 'read' })
-      .setProtectedHeader({ alg: 'ES256', typ: 'at+jwt' })
+      .setProtectedHeader({ alg: 'ES256', typ: 'ft+jwt' })
       .setIssuer('https://as.example.com')
       .setSubject('user|abc')
-      .setAudience('https://client1.example.com/client_id.json')
+      .setAudience('https://rs.example.com')
       .setIssuedAt(futureIat)
       .setExpirationTime(futureExp)
       .sign(as.privateKey);
@@ -67,7 +64,7 @@ describe('verify temporal bounds', () => {
     };
 
     await expect(
-      verify(tokenA, {
+      verify([tokenA], {
         resolveKey: async (issuer) => keys[issuer],
         clockTolerance: 0,
       }),
@@ -85,7 +82,6 @@ describe('verify temporal bounds', () => {
       audience: 'https://rs.example.com',
     });
 
-    // Normal frenchToast always sets iat to now, which is >= parent iat
     const tokenB = await frenchToast(tokenA, {
       privateKey: client1.privateKey,
       issuer: 'https://client1.example.com/client_id.json',
@@ -97,8 +93,7 @@ describe('verify temporal bounds', () => {
       'https://client1.example.com/client_id.json': client1.publicKey,
     };
 
-    // This should pass -- child iat >= parent iat
-    const result = await verify(tokenB, {
+    const result = await verify([tokenB, tokenA], {
       resolveKey: async (issuer) => keys[issuer],
     });
     expect(result.valid).toBe(true);
@@ -120,7 +115,6 @@ describe('verify temporal bounds', () => {
       expiresIn: 3600,
     });
 
-    // frenchToast caps exp, so this should produce a valid chain
     const tokenB = await frenchToast(tokenA, {
       privateKey: client1.privateKey,
       issuer: 'https://client1.example.com/client_id.json',
@@ -133,7 +127,7 @@ describe('verify temporal bounds', () => {
       'https://client1.example.com/client_id.json': client1.publicKey,
     };
 
-    const result = await verify(tokenB, {
+    const result = await verify([tokenB, tokenA], {
       resolveKey: async (issuer) => keys[issuer],
     });
     expect(result.valid).toBe(true);
@@ -143,7 +137,7 @@ describe('verify temporal bounds', () => {
     expect(childExp).toBeLessThanOrEqual(parentExp);
   });
 
-  it('should accept tokens within clock tolerance', async () => {
+  it('should accept single-token chain', async () => {
     const as = await makeKeyPair();
 
     const tokenA = await makeRootToken({
@@ -158,10 +152,10 @@ describe('verify temporal bounds', () => {
       'https://as.example.com': as.publicKey,
     };
 
-    // Should pass with default clock tolerance
-    const result = await verify(tokenA, {
+    const result = await verify([tokenA], {
       resolveKey: async (issuer) => keys[issuer],
     });
     expect(result.valid).toBe(true);
+    expect(result.chain).toHaveLength(1);
   });
 });

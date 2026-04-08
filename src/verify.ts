@@ -4,8 +4,9 @@ import {
   decodeProtectedHeader,
   createRemoteJWKSet,
 } from 'jose';
+import { createHash } from 'node:crypto';
 import type { JWTVerifyGetKey } from 'jose';
-import { FT_TYPE, FT_PARENT_HEADER } from './types.js';
+import { FT_TYPE, FT_PARENT_HEADER, FT_ISS_HEADER, FT_DEP_HEADER, CHAIN_DELIMITER } from './types.js';
 import type { KeyInput, VerifyOptions, VerifyResult, ChainLink } from './types.js';
 import {
   ChainVerificationError,
@@ -18,54 +19,95 @@ import { discoverKeys } from './discovery.js';
 
 const MAX_CHAIN_DEPTH = 10;
 
+function hashToken(token: string): string {
+  return createHash('sha256').update(token, 'ascii').digest('base64url');
+}
+
+/**
+ * Verify an FT-JWT chain.
+ *
+ * @param chain - Either a `&`-delimited chain string (outermost first, root last)
+ *                or an array of token strings in the same order.
+ * @param options - Verification options.
+ */
 export async function verify(
-  token: string,
+  chain: string | string[],
   options: VerifyOptions = {},
 ): Promise<VerifyResult> {
   const now = Math.floor(Date.now() / 1000);
   const clockTolerance = options.clockTolerance ?? 60;
   const maxDepth = options.maxDepth ?? MAX_CHAIN_DEPTH;
 
-  // ── Phase 1: Collect the chain (decode only, no verification) ──
-  // Walk ft_parent from outermost to root, collecting raw tokens.
+  // ── Phase 1: Parse the chain ──
 
-  const rawTokens: string[] = [];
-  let current = token;
+  const rawTokens: string[] = typeof chain === 'string'
+    ? chain.split(CHAIN_DELIMITER)
+    : chain;
 
-  while (current) {
-    if (rawTokens.length > maxDepth) {
-      throw new ChainVerificationError(
-        `Chain depth exceeds maximum of ${maxDepth}`,
-        rawTokens.length,
-      );
-    }
+  if (rawTokens.length === 0) {
+    throw new ChainVerificationError('Chain is empty', 0);
+  }
 
-    rawTokens.push(current);
+  if (rawTokens.length > maxDepth) {
+    throw new ChainVerificationError(
+      `Chain depth exceeds maximum of ${maxDepth}`,
+      rawTokens.length,
+    );
+  }
 
-    const header = decodeProtectedHeader(current);
-    if (header.typ === FT_TYPE && header[FT_PARENT_HEADER]) {
-      current = header[FT_PARENT_HEADER] as string;
-    } else {
-      break;
+  // ── Phase 2: Check allowed issuers (before any key discovery or network requests) ──
+
+  if (options.allowedIssuers) {
+    const allowed = new Set(options.allowedIssuers);
+    for (let i = 0; i < rawTokens.length; i++) {
+      const payload = decodeJwt(rawTokens[i]);
+      const issuer = payload.iss as string | undefined;
+      if (!issuer || !allowed.has(issuer)) {
+        throw new ChainVerificationError(
+          `Issuer "${issuer ?? '(missing)'}" is not in the allowed issuers list`,
+          i,
+        );
+      }
     }
   }
 
-  // ── Phase 2: Verify inside-out (root first) ──
-  // If the root is invalid, nothing derived from it matters.
+  // ── Phase 3: Verify hash binding ──
+  // Each non-root token's ft_parent must equal sha256(next token in array)
 
-  const chain: ChainLink[] = [];
+  for (let i = 0; i < rawTokens.length - 1; i++) {
+    const header = decodeProtectedHeader(rawTokens[i]);
+    const expectedHash = hashToken(rawTokens[i + 1]);
+    const actualHash = header[FT_PARENT_HEADER] as string | undefined;
+
+    if (!actualHash) {
+      throw new ChainVerificationError(
+        'Token is missing "ft_parent" header',
+        i,
+      );
+    }
+
+    if (actualHash !== expectedHash) {
+      throw new ChainVerificationError(
+        'ft_parent hash does not match next token in chain',
+        i,
+      );
+    }
+  }
+
+  // ── Phase 4: Verify signatures and claims inside-out (root first) ──
+
+  const result: ChainLink[] = [];
   let parentExp: number | undefined;
   let parentIat: number | undefined;
   let rootSub: string | undefined;
   let rootAud: string | undefined;
 
-  // Iterate from root (last collected) to outermost (first collected)
   for (let i = rawTokens.length - 1; i >= 0; i--) {
     const raw = rawTokens[i];
     const header = decodeProtectedHeader(raw);
     const payload = decodeJwt(raw);
     const issuer = payload.iss;
-    const depth = rawTokens.length - 1 - i; // root = 0 in verification order
+    const depth = rawTokens.length - 1 - i;
 
     // Resolve key for this issuer
     let getKey: JWTVerifyGetKey | KeyInput;
@@ -122,16 +164,13 @@ export async function verify(
     // ── Chain constraints (for non-root tokens) ──
 
     if (depth === 0) {
-      // This is the root token — establish the baseline
       rootSub = payload.sub as string | undefined;
       rootAud = payload.aud as string | undefined;
     } else {
-      // Child exp MUST NOT exceed parent exp
       if (parentExp !== undefined && exp > parentExp) {
         throw new ExpiryExceededError();
       }
 
-      // Child iat MUST NOT be before parent iat
       if (parentIat !== undefined && iat < parentIat) {
         throw new ChainVerificationError(
           'Child "iat" is before parent "iat"',
@@ -139,40 +178,83 @@ export async function verify(
         );
       }
 
-      // Sub MUST match throughout the chain
       if (rootSub && payload.sub !== rootSub) {
         throw new SubjectMismatchError();
       }
 
-      // Aud MUST match throughout the chain
       if (rootAud && payload.aud !== rootAud) {
         throw new AudienceMismatchError();
+      }
+
+      // ── ft_iss: parent's allowed issuers must permit this token's issuer ──
+      // Read ft_iss from the parent token (i+1 in the array, which was processed before us)
+      const parentHeader = decodeProtectedHeader(rawTokens[i + 1]);
+      const parentFtIss = parentHeader[FT_ISS_HEADER] as string[] | undefined;
+      if (parentFtIss && issuer && !parentFtIss.includes(issuer)) {
+        throw new ChainVerificationError(
+          `Issuer "${issuer}" is not allowed by parent's ft_iss`,
+          depth,
+        );
+      }
+
+      // ── ft_dep: parent's depth must allow this delegation ──
+      const parentFtDep = parentHeader[FT_DEP_HEADER] as number | undefined;
+      if (parentFtDep !== undefined && parentFtDep <= 0) {
+        throw new ChainVerificationError(
+          'Parent token does not allow further delegation (ft_dep is 0)',
+          depth,
+        );
+      }
+
+      // ── ft_iss/ft_dep monotonic reduction: child must be subset/less ──
+      const childFtIss = header[FT_ISS_HEADER] as string[] | undefined;
+      if (parentFtIss && childFtIss) {
+        const parentSet = new Set(parentFtIss);
+        for (const iss of childFtIss) {
+          if (!parentSet.has(iss)) {
+            throw new ChainVerificationError(
+              `Child ft_iss contains "${iss}" which is not in parent's ft_iss`,
+              depth,
+            );
+          }
+        }
+      }
+
+      const childFtDep = header[FT_DEP_HEADER] as number | undefined;
+      if (parentFtDep !== undefined && childFtDep !== undefined && childFtDep >= parentFtDep) {
+        throw new ChainVerificationError(
+          'Child ft_dep must be less than parent ft_dep',
+          depth,
+        );
       }
     }
 
     parentExp = exp;
     parentIat = iat;
 
-    chain.push({
+    result.push({
       header: header as unknown as Record<string, unknown>,
       payload: payload as unknown as Record<string, unknown>,
-      depth: i, // depth in the output: 0 = outermost, N = root
+      depth: i,
     });
   }
 
-  // ── Phase 3: DPoP verification (after outermost signature is verified) ──
+  // ── Phase 5: DPoP verification (after all signatures are verified) ──
 
   if (options.dpopProof) {
     if (!options.method || !options.url) {
       throw new Error('method and url are required when dpopProof is provided');
     }
 
-    const outerPayload = decodeJwt(token);
+    const outermost = rawTokens[0];
+    const outerPayload = decodeJwt(outermost);
     const cnf = outerPayload.cnf as { jkt?: string } | undefined;
     if (cnf?.jkt) {
+      // ath binds to the full chain string
+      const chainString = rawTokens.join(CHAIN_DELIMITER);
       await verifyDPoPProof(
         options.dpopProof,
-        token,
+        chainString,
         cnf.jkt,
         options.method,
         options.url,
@@ -181,7 +263,7 @@ export async function verify(
   }
 
   // Reverse so output is outer-to-root (depth 0 = outermost)
-  chain.reverse();
+  result.reverse();
 
-  return { valid: true, chain };
+  return { valid: true, chain: result };
 }

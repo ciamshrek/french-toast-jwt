@@ -35,4 +35,4 @@ export {
   KeyDiscoveryError,
 } from './errors.js';
 
-export { FT_TYPE, FT_PARENT_HEADER } from './types.js';
+export { FT_TYPE, FT_PARENT_HEADER, FT_ISS_HEADER, FT_DEP_HEADER, CHAIN_DELIMITER, DEFAULT_MAX_DEPTH } from './types.js';

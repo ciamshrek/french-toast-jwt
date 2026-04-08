@@ -10,13 +10,11 @@ const jwksCache = new Map<string, JWTVerifyGetKey>();
  * 1. OpenID Connect discovery
  * 2. OAuth Authorization Server Metadata (RFC 8414)
  * 3. Client ID Metadata Document (draft-ietf-oauth-client-id-metadata-document)
- * 4. OAuth Protected Resource Metadata (RFC 9728)
  */
 const WELL_KNOWN_PATHS = [
   '/.well-known/openid-configuration',
   '/.well-known/oauth-authorization-server',
   '/.well-known/oauth-client',
-  '/.well-known/oauth-protected-resource',
 ];
 
 interface Metadata {
